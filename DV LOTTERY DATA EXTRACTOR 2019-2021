@@ -1,0 +1,360 @@
+# ============================================
+# DV LOTTERY DATA EXTRACTOR 2019-2021
+# With Interactive Search (Like your 2016-2018 version)
+# ============================================
+
+# ============================================
+# IMPORT PACKAGES
+# ============================================
+import os
+import re
+import sys
+import pdfplumber
+import pandas as pd
+import numpy as np
+from datetime import datetime
+
+# Configure pandas display (shows ALL data, not hide any rows or columns)
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_colwidth', 50)
+
+# ============================================
+# CONFIGURATION - CHANGE THIS PATH
+# ============================================
+pdf_path = r"C:\Users\WHO\Desktop\DV-applicants-entrants-by-country-2019-2021-Accessible-7-26-2024 upload.pdf"
+
+print("="*80)
+print("📊 DV LOTTERY DATA EXTRACTOR 2019-2021")
+print("="*80)
+
+# ============================================
+# STEP 1: CHECK IF FILE EXISTS
+# ============================================
+if not os.path.exists(pdf_path):
+    print(f"\n❌ ERROR: File not found at: {pdf_path}")
+    print("\nPlease check:")
+    print("1. The file path is correct")
+    print("2. The file hasn't been moved or renamed")
+    print("3. You're using the correct folder name")
+    input("\nPress Enter to exit...")
+    sys.exit(1)
+
+file_size = os.path.getsize(pdf_path)
+print(f"\n✅ File found: {os.path.basename(pdf_path)}")
+print(f"   📁 Size: {file_size:,} bytes ({file_size/1024/1024:.2f} MB)")
+
+# ============================================
+# STEP 2: EXTRACT TEXT FROM PDF
+# ============================================
+print("\n" + "📝"*40)
+print("📝 EXTRACTING TEXT FROM PDF")
+print("📝"*40)
+
+all_text = ""
+page_texts = []
+
+with pdfplumber.open(pdf_path) as pdf:
+    print(f"📄 PDF has {len(pdf.pages)} pages")
+    
+    for page_num, page in enumerate(pdf.pages, 1):
+        print(f"\n📄 Processing page {page_num}...")
+        
+        # Extract text
+        text = page.extract_text()
+        
+        if text:
+            print(f"   ✅ Extracted {len(text)} characters")
+            all_text += text + "\n"
+            page_texts.append(text)
+            
+            # Show preview
+            preview = text[:200].replace('\n', ' ').strip()
+            print(f"   Preview: {preview}...")
+        else:
+            print("   ❌ No text extracted from this page")
+
+# ============================================
+# STEP 3: SAVE RAW TEXT FOR DEBUGGING
+# ============================================
+print("\n" + "💾"*40)
+print("💾 SAVING RAW TEXT")
+print("💾"*40)
+
+with open('dv_lottery_2019_2021_raw_text.txt', 'w', encoding='utf-8') as f:
+    f.write(all_text)
+print(f"✅ Raw text saved to: dv_lottery_2019_2021_raw_text.txt")
+
+# ============================================
+# STEP 4: ANALYZE TEXT STRUCTURE
+# ============================================
+print("\n" + "🔍"*40)
+print("🔍 ANALYZING TEXT STRUCTURE")
+print("🔍"*40)
+
+lines = all_text.split('\n')
+print(f"📊 Total lines: {len(lines)}")
+
+# Show first 20 lines to see structure
+print("\n📋 FIRST 20 LINES OF TEXT:")
+print("-"*60)
+for i, line in enumerate(lines[:20]):
+    if line.strip():
+        print(f"Line {i+1}: {line[:100]}")
+print("-"*60)
+
+# ============================================
+# STEP 5: EXTRACT DATA USING PATTERNS
+# ============================================
+print("\n" + "🔎"*40)
+print("🔎 EXTRACTING DATA PATTERNS")
+print("🔎"*40)
+
+# Pattern for 2019-2021 data: Country + 3 numbers (Entrants for each year)
+# From your output, the data is in format: "Europe Albania 172,817 158,148 330,965"
+pattern = r'([A-Za-z\s-]+?)\s+(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s+(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s+(\d{1,3}(?:,\d{3})*(?:\.\d+)?)'
+
+matches = re.findall(pattern, all_text, re.MULTILINE)
+print(f"✅ Found {len(matches)} potential data rows")
+
+# Convert matches to DataFrame
+data_rows = []
+for match in matches:
+    if len(match) == 4:  # Country + 3 numbers
+        country = match[0].strip()
+        # Clean up country name (remove "Europe " prefix if present)
+        country = re.sub(r'^Europe\s+', '', country)
+        
+        # Only add if it looks like a real country (not headers)
+        if not any(x in country for x in ['Page', 'Table', 'Total', 'Foreign', 'Chargeability']):
+            data_rows.append({
+                'Country': country,
+                'FY2019_Entrants': match[1],
+                'FY2020_Entrants': match[2],
+                'FY2021_Entrants': match[3]
+            })
+
+print(f"✅ Cleaned to {len(data_rows)} country rows")
+
+# ============================================
+# STEP 6: CREATE DATAFRAME
+# ============================================
+print("\n" + "📊"*40)
+print("📊 CREATING DATAFRAME")
+print("📊"*40)
+
+df = pd.DataFrame(data_rows)
+
+# Convert numbers (remove commas)
+for col in ['FY2019_Entrants', 'FY2020_Entrants', 'FY2021_Entrants']:
+    df[col] = df[col].astype(str).str.replace(',', '')
+    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+
+# Calculate total
+df['Total_Entrants_All_Years'] = df['FY2019_Entrants'] + df['FY2020_Entrants'] + df['FY2021_Entrants']
+
+print(f"✅ Created DataFrame with {len(df)} rows and {len(df.columns)} columns")
+
+# Show sample
+print("\n📋 DATA PREVIEW (first 10 rows):")
+print(df.head(10).to_string())
+
+# ============================================
+# STEP 7: DISPLAY TOP COUNTRIES
+# ============================================
+print("\n" + "🏆"*40)
+print("🏆 TOP 20 COUNTRIES 2019-2021")
+print("🏆"*40)
+
+top_countries = df.sort_values('Total_Entrants_All_Years', ascending=False).head(20).reset_index(drop=True)
+
+print(f"\n{'Rank':<6} {'Country':<30} {'FY2019':>12} {'FY2020':>12} {'FY2021':>12} {'TOTAL':>15}")
+print("-"*85)
+
+for idx, row in top_countries.iterrows():
+    print(f"{idx+1:<6} {row['Country'][:30]:<30} "
+          f"{row['FY2019_Entrants']:>12,} "
+          f"{row['FY2020_Entrants']:>12,} "
+          f"{row['FY2021_Entrants']:>12,} "
+          f"{row['Total_Entrants_All_Years']:>15,}")
+
+# Calculate percentage of total
+total_all = df['Total_Entrants_All_Years'].sum()
+print(f"\n{'':<6} {'TOTAL ALL COUNTRIES':<30} {'':>12} {'':>12} {'':>12} {total_all:>15,}")
+
+# ============================================
+# STEP 8: EXPORT TO EXCEL
+# ============================================
+print("\n" + "💾"*40)
+print("💾 EXPORTING TO EXCEL")
+print("💾"*40)
+
+output_file = 'DV_Lottery_2019_2021_Extracted.xlsx'
+try:
+    with pd.ExcelWriter(output_file) as writer:
+        df.to_excel(writer, sheet_name='All_Data', index=False)
+        top_countries.to_excel(writer, sheet_name='Top_20', index=False)
+        
+        # Summary sheet
+        summary = pd.DataFrame({
+            'Metric': ['Total Countries', 'Total Entrants (All Years)', 'File Name', 'Extraction Date'],
+            'Value': [
+                len(df),
+                f"{total_all:,}",
+                os.path.basename(pdf_path),
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ]
+        })
+        summary.to_excel(writer, sheet_name='Summary', index=False)
+    
+    print(f"✅ Data exported to: {output_file}")
+    print(f"   📁 File saved in: {os.getcwd()}")
+except Exception as e:
+    print(f"❌ Error exporting to Excel: {e}")
+
+# ============================================
+# STEP 9: INTERACTIVE SEARCH (Like your 2016-2018 version)
+# ============================================
+print("\n" + "🔍"*50)
+print("🔍 INTERACTIVE COUNTRY SEARCH 2019-2021")
+print("🔍 Type a country name to see its data")
+print("🔍 Type 'quit' to exit")
+print("="*70)
+
+while True:
+    # Ask for country name
+    country_search = input("\n🌍 Enter country name: ").strip()
+    
+    # Check if user wants to quit
+    if country_search.lower() == 'quit':
+        print("👋 Goodbye!")
+        break
+    
+    if not country_search:
+        continue
+    
+    print(f"\n📊 SEARCHING FOR: '{country_search}'")
+    print("-"*60)
+    
+    # Search for the country (case-insensitive partial match)
+    found = False
+    for idx, row in df.iterrows():
+        if country_search.lower() in row['Country'].lower():
+            found = True
+            rank = df[df['Total_Entrants_All_Years'] > row['Total_Entrants_All_Years']].shape[0] + 1
+            
+            # Calculate percentage
+            total_all = df['Total_Entrants_All_Years'].sum()
+            percentage = (row['Total_Entrants_All_Years'] / total_all) * 100
+            
+            # Display results (matching your 2016-2018 format)
+            print(f"\n✅ COUNTRY FOUND!")
+            print(f"   {'='*50}")
+            print(f"   🏆 GLOBAL RANK: #{rank} out of {len(df)} countries")
+            print(f"   🌍 Country: {row['Country']}")
+            print(f"   📊 Total Applicants (2019-2021): {row['Total_Entrants_All_Years']:,}")
+            print(f"   📈 Share of global total: {percentage:.2f}%")
+            print()
+            print(f"   📅 YEARLY BREAKDOWN:")
+            print(f"      2019: {row['FY2019_Entrants']:,} entrants")
+            print(f"      2020: {row['FY2020_Entrants']:,} entrants")
+            print(f"      2021: {row['FY2021_Entrants']:,} entrants")
+            
+            # Show growth trend
+            growth = row['FY2021_Entrants'] - row['FY2019_Entrants']
+            if growth > 0:
+                print(f"      📈 Growth (2019-2021): +{growth:,} applicants")
+            elif growth < 0:
+                print(f"      📉 Decline (2019-2021): {growth:,} applicants")
+            else:
+                print(f"      ➡️ No change (2019-2021)")
+            
+            # Show nearby rankings
+            print(f"\n   📍 NEARBY COUNTRIES:")
+            sorted_df = df.sort_values('Total_Entrants_All_Years', ascending=False).reset_index(drop=True)
+            
+            # Find this country's position
+            pos = None
+            for i, r in sorted_df.iterrows():
+                if r['Country'] == row['Country']:
+                    pos = i
+                    break
+            
+            if pos is not None:
+                for nearby in [pos-2, pos-1, pos, pos+1, pos+2]:
+                    if 0 <= nearby < len(sorted_df):
+                        nearby_row = sorted_df.iloc[nearby]
+                        marker = " ← YOUR COUNTRY" if nearby == pos else ""
+                        if nearby != pos:
+                            diff = nearby_row['Total_Entrants_All_Years'] - row['Total_Entrants_All_Years']
+                            if diff > 0:
+                                comparison = f"(↑ {diff:,.0f} higher)"
+                            else:
+                                comparison = f"(↓ {abs(diff):,.0f} lower)"
+                        else:
+                            comparison = ""
+                        print(f"      #{nearby+1}: {nearby_row['Country'][:25]:<25} {nearby_row['Total_Entrants_All_Years']:>12,} {comparison} {marker}")
+            break
+    
+    if not found:
+        print(f"\n❌ Country '{country_search}' not found in the dataset")
+        # Show suggestions
+        print("\n   Try one of these countries:")
+        sample_countries = df['Country'].head(20).tolist()
+        print("   " + ", ".join(sample_countries[:10]))
+
+# ============================================
+# STEP 10: QUICK LOOKUP FOR SPECIFIC COUNTRIES
+# ============================================
+print("\n" + "⚡"*50)
+print("⚡ QUICK LOOKUP FOR COMMON COUNTRIES")
+print("⚡"*50)
+
+# List of countries to check
+countries_to_check = ['Ghana', 'Nigeria', 'Kenya', 'Egypt', 'South Africa', 
+                      'Uganda', 'Morocco', 'Algeria', 'Ethiopia', 'Tanzania']
+
+print(f"\n{'Rank':<6} {'Country':<25} {'2019':>12} {'2020':>12} {'2021':>12} {'Total':>15}")
+print("-"*80)
+
+for country in countries_to_check:
+    found = False
+    for idx, row in df.iterrows():
+        if country.lower() in row['Country'].lower():
+            rank = df[df['Total_Entrants_All_Years'] > row['Total_Entrants_All_Years']].shape[0] + 1
+            print(f"#{rank:<4} {row['Country'][:25]:<25} "
+                  f"{row['FY2019_Entrants']:>12,} "
+                  f"{row['FY2020_Entrants']:>12,} "
+                  f"{row['FY2021_Entrants']:>12,} "
+                  f"{row['Total_Entrants_All_Years']:>15,}")
+            found = True
+            break
+    if not found:
+        print(f"{'':<6} {country:<25} {'Not found':>12} {'':>12} {'':>12} {'':>15}")
+
+# ============================================
+# STEP 11: SUMMARY STATISTICS
+# ============================================
+print("\n" + "📊"*50)
+print("📊 DATASET SUMMARY 2019-2021")
+print("📊"*50)
+
+print(f"\nTotal countries in dataset: {len(df)}")
+print(f"Total applicants (all countries): {df['Total_Entrants_All_Years'].sum():,}")
+print(f"Average applicants per country: {int(df['Total_Entrants_All_Years'].mean()):,}")
+print(f"Median applicants: {int(df['Total_Entrants_All_Years'].median()):,}")
+print(f"Highest: {df['Total_Entrants_All_Years'].max():,} ({df.loc[df['Total_Entrants_All_Years'].idxmax(), 'Country']})")
+print(f"Lowest: {df['Total_Entrants_All_Years'].min():,} ({df.loc[df['Total_Entrants_All_Years'].idxmin(), 'Country']})")
+
+# Yearly totals
+print(f"\n📅 YEARLY TOTALS:")
+print(f"   2019: {df['FY2019_Entrants'].sum():,}")
+print(f"   2020: {df['FY2020_Entrants'].sum():,}")
+print(f"   2021: {df['FY2021_Entrants'].sum():,}")
+
+print("\n" + "="*80)
+print("✅ PROGRAM COMPLETED SUCCESSFULLY")
+print("="*80)
+print(f"\n📊 Output file: {os.path.abspath(output_file)}")
+input("\nPress Enter to exit...")
